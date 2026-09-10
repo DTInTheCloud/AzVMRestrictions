@@ -1,0 +1,145 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Azure VM Inventory - SKU Restrictions\n\nInventory of virtual machines highlighting SKUs, VM generation, disk controller type, and encryption status."
+      },
+      "name": "workbook-title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "f5ef5f58-f615-48ad-9dc8-b5946e95f84a",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "label": "Subscriptions",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "includeAll": true,
+              "showDefault": false
+            },
+            "value": [
+              "/subscriptions/dbdd1734-dc49-4f4c-b80c-be8eb117476d"
+            ]
+          }
+        ],
+        "style": "pills"
+      },
+      "name": "subscription-parameter"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "Select one or more subscriptions above. Unsuffixed VM sizes are classified as **v1**; explicit `_v2`, `_v3`, and `_v4` suffixes are classified accordingly. **ADE (AzureDiskEncryption)** is distinct from platform-managed server-side encryption, as is **Encryption at Host**."
+      },
+      "name": "classification-note"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type == 'microsoft.compute/virtualmachines'\n| extend vmSize = properties[\"hardwareProfile\"][\"vmSize\"]\n| extend normalizedVMSize = tolower(vmSize)\n| extend imagePublisher = tostring(properties.storageProfile.imageReference.publisher)\n| extend imageOffer = tostring(properties.storageProfile.imageReference.offer)\n| extend imageSku = tostring(properties.storageProfile.imageReference.sku)\n| extend SKUVersion = case(normalizedVMSize endswith '_v2', 'v2', normalizedVMSize endswith '_v3', 'v3', normalizedVMSize endswith '_v4', 'v4', normalizedVMSize matches regex '_v[0-9]+$', 'Outside v1-v4', 'v1')\n| extend vmGen = properties[\"extended\"][\"instanceView\"][\"hyperVGeneration\"]\n| extend diskController = properties[\"storageProfile\"][\"diskControllerType\"]\n| extend encryptAtHost = properties[\"securityProfile\"][\"encryptionAtHost\"]\n| extend vmID = tolower(id)\n| project vmName = name,\n          vmID,\n          vmSize,\n          SKUVersion,\n          vmGen,\n          imagePublisher,\n          imageOffer,\n          imageSku,\n          diskController,\n          encryptAtHost,\n          location\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines/extensions'\n    | extend vmId = tolower(tostring(split(id, '/extensions/')[0]))\n    | extend extPublisher = tostring(properties.publisher)\n    | extend extType = tostring(properties.type)\n    | extend ade = case(extType startswith \"AzureDiskEncryption\", 'true', '')\n    | where extType == 'AzureDiskEncryption' or extType == 'AzureDiskEncryptionForLinux'\n    | project AzureDiskEncryption = ade,\n              vmId\n) on $left.vmID == $right.vmId\n| project-away vmID, vmId\n| project vmName,\n          vmSize,\n          SKUVersion,\n          vmGen,\n          diskController,\n          AzureDiskEncryption,\n          encryptAtHost,\n          imageOffer,\n          imageSku,\n          imagePublisher,\n          location",
+        "size": 0,
+        "title": "Virtual machine details",
+        "timeContext": {
+          "durationMs": 86400000
+        },
+        "exportToExcelOptions": "visible",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "gridSettings": {
+          "filter": true,
+          "sortBy": [
+            {
+              "itemKey": "SKUVersion",
+              "sortOrder": 1
+            },
+            {
+              "itemKey": "VMName",
+              "sortOrder": 1
+            }
+          ],
+          "formatters": [],
+          "labelSettings": [
+            {
+              "columnId": "vmName",
+              "label": "VM Name"
+            },
+            {
+              "columnId": "vmSize",
+              "label": "VM Size"
+            },
+            {
+              "columnId": "SKUVersion",
+              "label": "VM SKU Version"
+            },
+            {
+              "columnId": "vmGen",
+              "label": "VM Generation"
+            },
+            {
+              "columnId": "diskController",
+              "label": "Disk Controller"
+            },
+            {
+              "columnId": "AzureDiskEncryption",
+              "label": "ADE"
+            },
+            {
+              "columnId": "encryptAtHost",
+              "label": "Encryption at Host"
+            },
+            {
+              "columnId": "imageOffer",
+              "label": "Image Offer"
+            },
+            {
+              "columnId": "imageSku",
+              "label": "Image SKU"
+            },
+            {
+              "columnId": "imagePublisher",
+              "label": "Publisher"
+            },
+            {
+              "columnId": "location",
+              "label": "Location"
+            }
+          ],
+          "hierarchySettings": {}
+        }
+      },
+      "name": "vm-inventory"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Data interpretation\n\n- **VM SKU Version** uses the version designation from the VM size.\n- **VM Generation** uses the VM instance view.\n- **Disk Controller** uses the diskControllerType from the storage profile.\n- **ADE = true** when Resource Graph finds the `AzureDiskEncryption` / `AzureDiskEncryptionForLinux` VM extension. This does not classify server-side encryption or encryption at host as ADE.\n- **Encryption At Host - true** when Resource Graph finds the encryptionAtHost flag set in the VM securityProfile. This does not classify server-side encryption or Azure Disk Encryption as Encryption At Host\n- **Image Offer/SKU/Publisher** uses instance-view data when available, then the configured Marketplace image reference. Specialized or older VMs may report `Unknown`.\n- Resource Graph access and freshness determine which resources and properties appear."
+      },
+      "name": "data-notes"
+    }
+  ],
+  "fallbackResourceIds": [
+    "Azure Monitor"
+  ],
+  "layout": {
+    "type": "flow"
+  },
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
