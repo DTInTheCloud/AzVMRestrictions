@@ -1,0 +1,46 @@
+resources
+| where type == 'microsoft.compute/virtualmachines'
+| extend vmSize = properties["hardwareProfile"]["vmSize"]
+| extend normalizedVMSize = tolower(vmSize)
+| extend imagePublisher = tostring(properties.storageProfile.imageReference.publisher)
+| extend imageOffer = tostring(properties.storageProfile.imageReference.offer)
+| extend imageSku = tostring(properties.storageProfile.imageReference.sku)
+| extend SKUVersion = case(normalizedVMSize endswith '_v2', 'v2', normalizedVMSize endswith '_v3', 'v3', normalizedVMSize endswith '_v4', 'v4', normalizedVMSize matches regex '_v[0-9]+$', 'Outside v1-v4', 'v1')
+| extend vmGen = properties["extended"]["instanceView"]["hyperVGeneration"]
+| extend diskController = properties["storageProfile"]["diskControllerType"]
+| extend encryptAtHost = properties["securityProfile"]["encryptionAtHost"]
+| extend vmID = tolower(id)
+| project vmName = name,
+          vmID,
+          vmSize,
+          SKUVersion,
+          vmGen,
+          imagePublisher,
+          imageOffer,
+          imageSku,
+          diskController,
+          encryptAtHost,
+          location
+| join kind=leftouter (
+    resources
+    | where type =~ 'microsoft.compute/virtualmachines/extensions'
+    | extend vmId = tolower(tostring(split(id, '/extensions/')[0]))
+    | extend extPublisher = tostring(properties.publisher)
+    | extend extType = tostring(properties.type)
+    | extend ade = case(extType startswith "AzureDiskEncryption", 'true', '')
+    | where extType == 'AzureDiskEncryption' or extType == 'AzureDiskEncryptionForLinux'
+    | project AzureDiskEncryption = ade,
+              vmId
+) on $left.vmID == $right.vmId
+| project-away vmID, vmId
+| project vmName,
+          vmSize,
+          SKUVersion,
+          vmGen,
+          diskController,
+          AzureDiskEncryption,
+          encryptAtHost,
+          imageOffer,
+          imageSku,
+          imagePublisher,
+          location
